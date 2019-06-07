@@ -1,0 +1,137 @@
+---
+version: 2.1
+commands:
+  s3deploy_production:
+    description: "Deploy to S3"
+    parameters:
+      to:
+        type: string
+      cf_distribution_id:
+        type: string
+    steps:
+      - run: |
+          aws configure set preview.cloudfront true
+      - run: |
+          aws s3 sync ./production s3://<< parameters.to >> \
+            --acl public-read --delete \
+            --cache-control max-age=31536000
+      - run: |
+          aws cloudfront create-invalidation \
+              --distribution-id << parameters.cf_distribution_id >> \
+              --paths /\*
+  s3deploy_staging:
+    description: "Deploy to S3"
+    parameters:
+      to:
+        type: string
+      cf_distribution_id:
+        type: string
+    steps:
+      - run: |
+          aws configure set preview.cloudfront true
+      - run: |
+          aws s3 sync ./staging s3://<< parameters.to >> \
+            --acl public-read --delete \
+            --cache-control max-age=31536000
+      - run: |
+          aws cloudfront create-invalidation \
+              --distribution-id << parameters.cf_distribution_id >> \
+              --paths /\*
+
+jobs:
+  build_production:
+    docker:
+      - image: circleci/node:8.12.0
+    environment:
+      REACT_APP_NODE_ENV: PRODUCTION
+    working_directory: ~/resources
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/resources
+      - run: yarn
+      - run: yarn build:production
+      - persist_to_workspace:
+          root: .
+          paths: production
+  build_staging:
+    docker:
+      - image: circleci/node:8.12.0
+    environment:
+      REACT_APP_NODE_ENV: STAGING
+    working_directory: ~/resources
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/resources
+      - run: yarn
+      - run: yarn build:production
+      - persist_to_workspace:
+          root: .
+          paths: staging
+
+  deploy_production:
+    docker:
+      - image: circleci/python
+    working_directory: ~/production
+    environment:
+      PUBLIC_URL: https://resources.codeyourfuture.io
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/production
+      - run:
+          name: Install awscli
+          command: sudo pip install awscli
+      - s3deploy_production:
+          to: "resources.codeyourfuture.io"
+          cf_distribution_id: ""
+  deploy_staging:
+    docker:
+      - image: circleci/python
+    working_directory: ~/staging
+    environment:
+      PUBLIC_URL: https://resources.staging.codeyourfuture.io
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/staging
+      - run:
+          name: Install awscli
+          command: sudo pip install awscli
+      - s3deploy_staging:
+          to: "resources.staging.codeyourfuture.io"
+          cf_distribution_id: ""
+
+workflows:
+  version: 2
+  test_and_deploy:
+    jobs:
+      - build_production:
+          context: build
+          filters:
+            branches:
+              only:
+                - master
+      - build_staging:
+          context: build
+          filters:
+            branches:
+              only:
+                - staging
+      - deploy_production:
+          context: deployments
+          requires:
+            - build_production
+          filters:
+            branches:
+              only:
+                - master
+      - deploy_staging:
+          context: deployments
+          requires:
+            - build_staging
+          filters:
+            branches:
+              only:
+                - staging
