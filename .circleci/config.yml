@@ -65,7 +65,7 @@ jobs:
       - attach_workspace:
           at: ~/resources
       - run: yarn
-      - run: yarn build:production
+      - run: yarn build:staging
       - persist_to_workspace:
           root: .
           paths: staging
